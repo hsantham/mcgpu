@@ -1,0 +1,2 @@
+nvcc -c --compiler-options -std=gnu99 --compiler-options -ffloat-store --compiler-options -fno-strict-aliasing --compiler-options -fsigned-char --compiler-options  -Wall -Iinc -D __USE_LARGEFILE64 -D _FILE_OFFSET_BITS=64 -O0 --compiler-options  -O3 mcgpu.cu -o h.o --compiler-options  -g -G
+gcc -std=gnu99 -ffloat-store -fno-strict-aliasing -fsigned-char  -O0 -o h.exe h.o  -lm  -L/usr/local/cuda-7.5/lib64/ -lcuda -lcudart
