@@ -250,8 +250,12 @@ __global__ void sq(FileContent   fileContent,
                    BigBoy        fileSize, 
                    BigBoy        n,
                    BigBoy        chunkSize,
-                   ChunkOrder    *reorderInfo)
+                   double*       dScores,
+                   uint8_t*      dSyncBuffer)
 {
+    dSyncBuffer[blockIdx.x] = 0;
+    __syncthreads();
+
     int myIdx = blockIdx.x * blockDim.x + threadIdx.x;
     int myLimit = myIdx + chunkSize;
 
@@ -263,6 +267,42 @@ __global__ void sq(FileContent   fileContent,
 
     FileContent myContent = fileContent + myIdx;
     *myContent = '0' + myIdx/10;
+    
+
+    uint32_t firstChunk, secondChunk, i; 
+    for(i = 1; i <= (n-1); i++) {
+        if(myIdx < (i*n - (i*(i+1))/2)) {
+            firstChunk = i;
+            break;
+        }
+    } 
+
+    secondChunk = 1 + myIdx - ((i-1)*n - ((i-1)*i)/2);
+    __syncthreads();
+
+    double score = getScore(fileContent+(firstChunk-1)*chunkSize, chunkSize, fileContent+(secondChunk-1)*chunkSize, chunkSize);
+    dScores[myIdx] = score;
+
+    __syncthreads();
+    dSyncBuffer[blockIdx.x] = 1;
+
+    unsigned int noOfBlocks = (int) ceil(((double)nc2/(double)threadsPerBlock));
+    for(i = 0; i < noOfBlocks; i++) {
+        if(dSyncBuffer[i] == 0) i--;
+    }
+
+    if(myIdx >= n) return;
+    uint32_t start = (myIdx*n - (myIdx*(myIdx+1))/2);
+    uint32_t end   = ((myIdx+1)*n - ((myIdx+1)*(myIdx+2))/2)
+    uint32_t max = dScores[start], maxIndex = start;
+    for(i = start; i < end; i++) {
+       if(dScores[i] > max) {
+            max = dScores[i];
+            maxIndex = i;
+       } 
+    }
+    
+    dScores[start] = maxIndex;
 }
 
 extern "C"
@@ -309,39 +349,50 @@ inline void __checkCudaErrors(int err, const char *file, const int line)
 extern "C"
 int main() {
 
-filename = (unsigned char *) "/home/anand/Desktop/hemanth/phase2/text8";
+    filename = (unsigned char *) "/home/anand/Desktop/hemanth/phase2/text8";
 
-FileContent deviceFileBuffer, hostFileBuffer;
-BigBoy filesize = getFilesize(filename);
-BigBoy chunkSize = 1024*1024;
-ChunkOrder *deviceReorderInfo, *hostReorderInfo;
-BigBoy n = (int) ceil(((double)filesize/(double)chunkSize));
-BigBoy nc2 = findNC2(n);
-unsigned int threadsPerBlock = 1024;
-unsigned int noOfBlocks = (int) ceil(((double)nc2/(double)threadsPerBlock));
+    FileContent deviceFileBuffer, hostFileBuffer, reorderedFileBuffer;
+    BigBoy filesize = getFilesize(filename);
+    BigBoy chunkSize = 1024*1024;
+    ChunkOrder *deviceReorderInfo, *hostReorderInfo;
+    double *dScores, *hScores;
+    uint8_t *dSyncBuffer;
+    BigBoy n = (int) ceil(((double)filesize/(double)chunkSize));
+    BigBoy nc2 = findNC2(n);
+    unsigned int threadsPerBlock = 1024;
+    unsigned int noOfBlocks = (int) ceil(((double)nc2/(double)threadsPerBlock));
 
-hostFileBuffer = (FileContent) malloc(filesize+1);
-getFileContent(filename, hostFileBuffer);
+    hostFileBuffer = (FileContent) malloc(filesize+1);
+    reorderedFileBuffer = (FileContent) malloc(filesize+1);
+    getFileContent(filename, hostFileBuffer);
 
-checkCudaErrors(cudaMalloc((void **)&deviceFileBuffer, filesize));
-checkCudaErrors(cudaMalloc((void **)&deviceReorderInfo, sizeof(ChunkOrder)*n));
-hostReorderInfo = (ChunkOrder *) malloc(sizeof(ChunkOrder)*n);
+    checkCudaErrors(cudaMalloc((void **)&deviceFileBuffer, filesize));
+    checkCudaErrors(cudaMalloc((void **)&dScores, sizeof(double)*nc2));
+    checkCudaErrors(cudaMalloc((void **)&dSyncBuffer, sizeof(uint8_t)*10));
+    hostReorderInfo = (ChunkOrder *) malloc(sizeof(ChunkOrder)*n);
 
 
-checkCudaErrors(cudaMemcpy(deviceFileBuffer, hostFileBuffer, filesize, cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(deviceFileBuffer, hostFileBuffer, filesize, cudaMemcpyHostToDevice));
 
-printf("Launching CUDA kernal for file size = %llu; chunk size = %llu; no of chunks = %llu;\n", filesize, chunkSize, n);
-printf("                          threadsPerBlock = %u; noOfBlocks = %u; \n", threadsPerBlock, noOfBlocks);
+    printf("Launching CUDA kernal for file size = %llu; chunk size = %llu; no of chunks = %llu;\n", filesize, chunkSize, n);
+    printf("                          threadsPerBlock = %u; noOfBlocks = %u; \n", threadsPerBlock, noOfBlocks);
 
-//sq<<<1, 1>>>(deviceFileBuffer, filesize, n, chunkSize, deviceReorderInfo);
-sq<<<noOfBlocks, threadsPerBlock>>>(deviceFileBuffer, filesize, n, chunkSize, deviceReorderInfo);
+    sq<<<noOfBlocks, threadsPerBlock>>>(deviceFileBuffer, filesize, n, chunkSize, dScores, dSyncBuffer);
 
-printf("CUDA kernel execution over !!!\n");
+    printf("CUDA kernel execution over !!!\n");
 
-checkCudaErrors(cudaMemcpy(hostReorderInfo, deviceReorderInfo, sizeof(ChunkOrder)*n, cudaMemcpyDeviceToHost));
-checkCudaErrors(cudaMemcpy(hostFileBuffer, deviceFileBuffer, filesize, cudaMemcpyDeviceToHost));
+    hScores = (double *) malloc(sizeof(double)*nc2);
 
-checkCudaErrors(cudaFree(deviceReorderInfo));
-checkCudaErrors(cudaFree(deviceFileBuffer));
-return 0;
+    checkCudaErrors(cudaMemcpy(hostFileBuffer, deviceFileBuffer, filesize, cudaMemcpyDeviceToHost));
+    checkCudaErrors(cudaMemcpy(hScores, dScores, sizeof(double)*nc2, cudaMemcpyDeviceToHost));
+
+    memcpy(reorderedFileBuffer, hostFileBuffer, chunkSize);
+    for(uint32_t i = 0; i < n; i++) {
+        uint32_t start = (i*n - (i*(i+1))/2);
+        uint32_t bestMatchChunkIndex = i + 
+        memcpy(reorderedFileBuffer + (i+1)*chunkSize, hostFileBuffer+
+    }
+
+    checkCudaErrors(cudaFree(deviceFileBuffer));
+    return 0;
 }
