@@ -11,6 +11,8 @@ typedef unsigned char * FileName;
 typedef unsigned char * FileContent;
 typedef unsigned long long int BigBoy;
 
+__device__ float llAllocCount;
+
 // User defined data types
 struct chunkOrder {
   BigBoy chunkOffset;
@@ -24,6 +26,12 @@ struct llnode {
 
 typedef struct llnode LLNode;
 
+struct termvector {
+    unsigned char *term;
+    unsigned short count;
+};
+
+typedef struct termvector TermVector;
 struct hnode {
     unsigned char *string;
     unsigned char source;
@@ -31,15 +39,19 @@ struct hnode {
 };
 typedef struct hnode HNode;
 
-__device__ LLNode *getNewLLNode(void *data) {
+extern "C" 
+__device__ __host__  LLNode *getNewLLNode(void *data) {
+    //llAllocCount++;
     LLNode *head = (LLNode *) malloc(sizeof(LLNode));
+    assert(head != NULL);
     head->data = data;
     head->next = NULL;
 
     return head;
 }
 
-__device__ void append(LLNode *head, LLNode *nodeToInsert) {
+extern "C" 
+__device__ __host__  void append(LLNode *head, LLNode *nodeToInsert) {
   LLNode *node = head;
 
   while(node->next) node=node->next;
@@ -49,7 +61,7 @@ __device__ void append(LLNode *head, LLNode *nodeToInsert) {
 }
 
 extern "C"
-__device__ __host__ BigBoy findNC2(int n) {
+__device__ __host__   BigBoy findNC2(int n) {
 return ((n * (n-1))/2);
 }
 
@@ -60,7 +72,7 @@ typedef struct chunkOrder ChunkOrder;
 FileName filename;
 
 extern "C"
-__device__ void preprocess(FileContent   fileContent, int myIdx, int myLimit) {
+__device__ __host__  void preprocess(FileContent   fileContent, int myIdx, int myLimit) {
     for(int i = myIdx; i < myLimit; i++) {
         switch(fileContent[i]) {
             case '.':
@@ -78,7 +90,8 @@ __device__ void preprocess(FileContent   fileContent, int myIdx, int myLimit) {
 #define MAX_HASH_TABLE_ENTRIES 20
 #define MAX_NODES_IN_HASH_TABLE 250
 
-__device__ uint32_t getHash(FileContent string, uint32_t length) {
+extern "C" 
+__device__ __host__  uint32_t getHash(FileContent string, uint32_t length) {
     uint32_t hash = 0;
     for(uint32_t i = 0; i < length; i++) {
         hash = hash + string[i];
@@ -87,7 +100,8 @@ __device__ uint32_t getHash(FileContent string, uint32_t length) {
     return hash % MAX_HASH_TABLE_ENTRIES;
 }
 
-__device__ HNode* getHashNode(FileContent string, 
+extern "C" 
+__device__ __host__  HNode* getHashNode(FileContent string, 
                    uint8_t     source, 
                    uint8_t     count, 
                    HNode*      nodes, 
@@ -101,7 +115,8 @@ __device__ HNode* getHashNode(FileContent string,
     return node;
 } 
 
-__device__ void fillHashTable(LLNode **hashTable, uint32_t hash, LLNode *node) {
+extern "C" 
+__device__ __host__  void fillHashTable(LLNode **hashTable, uint32_t hash, LLNode *node) {
     LLNode *head = hashTable[hash];
     if(head == NULL) {
         hashTable[hash] = head;
@@ -111,7 +126,8 @@ __device__ void fillHashTable(LLNode **hashTable, uint32_t hash, LLNode *node) {
     }
 }
 
-__device__ LLNode* findMatchingNode(LLNode* head, FileContent content) {
+extern "C" 
+__device__ __host__  LLNode* findMatchingNode(LLNode* head, FileContent content) {
     LLNode *node = head;
     while(node) {
         FileContent existing = (FileContent) node->data;
@@ -136,7 +152,7 @@ __device__ LLNode* findMatchingNode(LLNode* head, FileContent content) {
 }
 
 extern "C"
-__device__ double getScoreFromHashTable(LLNode **hashTable) {
+ __device__ __host__  double getScoreFromHashTable(LLNode **hashTable) {
     double euclidDist = 0;
     for(uint32_t i = 0; i < MAX_HASH_TABLE_ENTRIES; i++) {
         LLNode *node = hashTable[i];
@@ -150,8 +166,73 @@ __device__ double getScoreFromHashTable(LLNode **hashTable) {
     return sqrt((double) euclidDist);
 }
 
+extern "C" 
+__device__ __host__ uint32_t isMatch(unsigned char *term1, unsigned char *term2) {
+    while(*term1 == *term2) {
+        if(*term1 == '\0') return 1;
+        term1++; term2++;
+    }
+    
+    return 0;
+}
+
+extern "C" 
+__device__ __host__ uint32_t findTerm(TermVector *vector, uint32_t used, unsigned char *term) {
+    for(int32_t i = 0; i < used; i++) {
+        if(isMatch(vector[used].term, term)) {
+            return i;
+        }
+    }
+
+    return (unsigned int)-1;
+}
+
 extern "C"
-__device__ double getScore(FileContent   content1, 
+__device__ __host__  void printVector(TermVector *vector, uint32_t used) {
+    for(int32_t i = 0; i < used; i++) {
+        uint32_t j=0;
+        while(vector[i].term[j] != '\0') {
+            printf("%c", vector[i].term[j]);
+            j++;
+        }
+        printf("   = %d\n",vector[i].count);
+    }
+}
+
+extern "C"
+void ggetScore(FileContent   content1, 
+                           unsigned int  letterCount1, 
+                           FileContent   content2, 
+                           unsigned int  letterCount2) {
+    TermVector vector1[1]; 
+    uint32_t i = 0, startIdx = (unsigned int)-1, used = 0;
+
+    for(; i < letterCount1; i++) {
+        if(content1[i] != ' ') {
+            startIdx = (startIdx == (unsigned int)-1) ? i : startIdx;
+            continue;
+        }
+
+        if(startIdx == (unsigned int)-1) {
+            continue;
+        }
+
+
+        uint32_t index = findTerm(vector1, used, content1+startIdx);
+        if(index == (unsigned int)-1) {
+            vector1[used].term = content1+i;
+            vector1[used].count = 1;
+        } else {
+            vector1[index].count++;
+        }
+    }
+
+    printVector(vector1, used);
+}
+
+extern "C"
+__device__ 
+__host__  double getScore(FileContent   content1, 
                            unsigned int  letterCount1, 
                            FileContent   content2, 
                            unsigned int  letterCount2) {
@@ -257,34 +338,38 @@ __global__ void sq(FileContent   fileContent,
     __syncthreads();
 
     int myIdx = blockIdx.x * blockDim.x + threadIdx.x;
+//    if(myIdx==0)
+//        *llAllocCount=0;
     int myLimit = myIdx + chunkSize;
-
     int nc2 = findNC2(n);
     if(nc2 <= myIdx) return;
 
     preprocess(fileContent, myIdx, myLimit);
     __syncthreads();
 
-    FileContent myContent = fileContent + myIdx;
-    *myContent = '0' + myIdx/10;
-    
-
-    uint32_t firstChunk, secondChunk, i; 
-    for(i = 1; i <= (n-1); i++) {
-        if(myIdx < (i*n - (i*(i+1))/2)) {
-            firstChunk = i;
-            break;
+    uint32_t firstChunk, secondChunk, i, j, k = 0; 
+    for(i = 0; i <= (n-1-1); i++) {
+        for(j = i+1; j <= (n-1); j++) {
+            if(myIdx == k) {
+                firstChunk = i;
+                secondChunk = j;
+                i = n; // To break from outer for loop
+                break;
+            }
+            k++;
         }
     } 
 
-    secondChunk = 1 + myIdx - ((i-1)*n - ((i-1)*i)/2);
     __syncthreads();
 
-    double score = getScore(fileContent+(firstChunk-1)*chunkSize, chunkSize, fileContent+(secondChunk-1)*chunkSize, chunkSize);
+    double score = getScore(fileContent + firstChunk*chunkSize, 
+                            chunkSize, 
+                            fileContent + secondChunk*chunkSize, 
+                            chunkSize);
     dScores[myIdx] = score;
 
     __syncthreads();
-    dSyncBuffer[blockIdx.x] = 1;
+/*    dSyncBuffer[blockIdx.x] = 1;
 
     unsigned int noOfBlocks = (int) ceil(((double)nc2/(double)threadsPerBlock));
     for(i = 0; i < noOfBlocks; i++) {
@@ -302,7 +387,7 @@ __global__ void sq(FileContent   fileContent,
        } 
     }
     
-    dScores[start] = maxIndex;
+    dScores[start] = maxIndex; */
 }
 
 extern "C"
@@ -347,13 +432,14 @@ inline void __checkCudaErrors(int err, const char *file, const int line)
 #endif
 
 extern "C"
-int main() {
+int main(int argc, char *argv[]) {
 
-    filename = (unsigned char *) "/home/anand/Desktop/hemanth/phase2/text8";
+    filename = (unsigned char *) "/home/anand/Desktop/hemanth/phase2/mcgpu/text8";
 
     FileContent deviceFileBuffer, hostFileBuffer, reorderedFileBuffer;
     BigBoy filesize = getFilesize(filename);
-    BigBoy chunkSize = 1024*1024;
+    
+    BigBoy chunkSize = (argc == 1) ? 1024 : atoi(argv[1]);
     ChunkOrder *deviceReorderInfo, *hostReorderInfo;
     double *dScores, *hScores;
     uint8_t *dSyncBuffer;
@@ -362,37 +448,62 @@ int main() {
     unsigned int threadsPerBlock = 1024;
     unsigned int noOfBlocks = (int) ceil(((double)nc2/(double)threadsPerBlock));
 
+    printf("File size = %llu; chunk size = %llu;    no of chunks = %llu;\n", filesize, chunkSize, n);
+    printf("nc2 = %llu;       threadsPerBlock = %u; no of Blocks = %u; \n", nc2, threadsPerBlock, noOfBlocks);
+
     hostFileBuffer = (FileContent) malloc(filesize+1);
     reorderedFileBuffer = (FileContent) malloc(filesize+1);
     getFileContent(filename, hostFileBuffer);
 
+    hostReorderInfo = (ChunkOrder *) malloc(sizeof(ChunkOrder)*n);
+    hScores = (double *) malloc(sizeof(double)*n*n);
+
+/*  
     checkCudaErrors(cudaMalloc((void **)&deviceFileBuffer, filesize));
     checkCudaErrors(cudaMalloc((void **)&dScores, sizeof(double)*nc2));
     checkCudaErrors(cudaMalloc((void **)&dSyncBuffer, sizeof(uint8_t)*10));
-    hostReorderInfo = (ChunkOrder *) malloc(sizeof(ChunkOrder)*n);
-
 
     checkCudaErrors(cudaMemcpy(deviceFileBuffer, hostFileBuffer, filesize, cudaMemcpyHostToDevice));
 
-    printf("Launching CUDA kernal for file size = %llu; chunk size = %llu; no of chunks = %llu;\n", filesize, chunkSize, n);
-    printf("                          threadsPerBlock = %u; noOfBlocks = %u; \n", threadsPerBlock, noOfBlocks);
+    printf("Launching CUDA kernal\n");
 
     sq<<<noOfBlocks, threadsPerBlock>>>(deviceFileBuffer, filesize, n, chunkSize, dScores, dSyncBuffer);
-
+    checkCudaErrors(cudaMemcpy(hScores, dScores, sizeof(double)*nc2, cudaMemcpyDeviceToHost));
     printf("CUDA kernel execution over !!!\n");
 
-    hScores = (double *) malloc(sizeof(double)*nc2);
+    checkCudaErrors(cudaFree(deviceFileBuffer));
+    checkCudaErrors(cudaFree(dScores));
+    checkCudaErrors(cudaFree(dSyncBuffer));
+*/
 
-    checkCudaErrors(cudaMemcpy(hostFileBuffer, deviceFileBuffer, filesize, cudaMemcpyDeviceToHost));
-    checkCudaErrors(cudaMemcpy(hScores, dScores, sizeof(double)*nc2, cudaMemcpyDeviceToHost));
+    ggetScore(hostFileBuffer, 
+                            chunkSize, 
+                            hostFileBuffer + 1*chunkSize, 
+                            chunkSize);
+    //hScores[0] = score;
 
-    memcpy(reorderedFileBuffer, hostFileBuffer, chunkSize);
-    for(uint32_t i = 0; i < n; i++) {
-        uint32_t start = (i*n - (i*(i+1))/2);
-        uint32_t bestMatchChunkIndex = i + 
-        memcpy(reorderedFileBuffer + (i+1)*chunkSize, hostFileBuffer+
+    for(int i = 0; i < nc2; i++) {
+        printf("%f\n",hScores[i]);
     }
 
-    checkCudaErrors(cudaFree(deviceFileBuffer));
+/*
+    uint32_t hostOrderInfo[100]={};
+    hostOrderInfo[0] = 0;
+    lastFilled = 0;
+    for(uint32_t i = 1; i < n; i++) {
+        uint32_t start = (lastFilled      * n - (lastFilled       * (lastFilled + 1))/2);
+        uint32_t end =   (lastFilled + 1) * n - ((lastFilled + 1) * (lastFilled + 2))/2;
+
+        uint32_t j = 1, bestMatch;
+        while(1) {
+            bestMatch = lastFilled + getKthbestMatch(hScores + start, end - start, j);
+            uint8_t  isFilled  = isAlreadyFilled(hostOrderInfo, i, bestMatch);
+            if(!isFilled) break;
+            j++;
+        }
+        hostOrderInfo[i] = bestMatch;
+        lastFilled = bestMatch; 
+    }
+*/
     return 0;
 }
