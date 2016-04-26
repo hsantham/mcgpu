@@ -1,10 +1,10 @@
-extern "C"
-{
+//extern "C"
+
 #include<stdio.h>
 #include <sys/stat.h>
 #include <assert.h>
 #include <stdint.h>
-}
+
 
 // TYPE DEFs
 typedef unsigned char * FileName;
@@ -39,7 +39,7 @@ struct hnode {
 };
 typedef struct hnode HNode;
 
-extern "C" 
+//extern "C" 
 __device__ __host__  LLNode *getNewLLNode(void *data) {
     //llAllocCount++;
     LLNode *head = (LLNode *) malloc(sizeof(LLNode));
@@ -50,7 +50,7 @@ __device__ __host__  LLNode *getNewLLNode(void *data) {
     return head;
 }
 
-extern "C" 
+//extern "C" 
 __device__ __host__  void append(LLNode *head, LLNode *nodeToInsert) {
   LLNode *node = head;
 
@@ -60,7 +60,7 @@ __device__ __host__  void append(LLNode *head, LLNode *nodeToInsert) {
   nodeToInsert->next = NULL;
 }
 
-extern "C"
+//extern "C"
 __device__ __host__   BigBoy findNC2(int n) {
 return ((n * (n-1))/2);
 }
@@ -71,7 +71,7 @@ typedef struct chunkOrder ChunkOrder;
 // Global variables
 FileName filename;
 
-extern "C"
+//extern "C"
 __device__ __host__  void preprocess(FileContent   fileContent, int myIdx, int myLimit) {
     for(int i = myIdx; i < myLimit; i++) {
         switch(fileContent[i]) {
@@ -90,22 +90,22 @@ __device__ __host__  void preprocess(FileContent   fileContent, int myIdx, int m
 #define MAX_HASH_TABLE_ENTRIES 20
 #define MAX_NODES_IN_HASH_TABLE 250
 
-extern "C" 
-__device__ __host__  uint32_t getHash(FileContent string, uint32_t length) {
-    uint32_t hash = 0;
-    for(uint32_t i = 0; i < length; i++) {
+//extern "C" 
+__device__ __host__  unsigned int getHash(FileContent string, unsigned int length) {
+    unsigned int hash = 0;
+    for(unsigned int i = 0; i < length; i++) {
         hash = hash + string[i];
     }
 
     return hash % MAX_HASH_TABLE_ENTRIES;
 }
 
-extern "C" 
+//extern "C" 
 __device__ __host__  HNode* getHashNode(FileContent string, 
                    uint8_t     source, 
                    uint8_t     count, 
                    HNode*      nodes, 
-                   uint32_t*   used) {
+                   unsigned int*   used) {
     HNode* node = nodes + *used;
     node->string = string;
     node->source = source;
@@ -115,8 +115,8 @@ __device__ __host__  HNode* getHashNode(FileContent string,
     return node;
 } 
 
-extern "C" 
-__device__ __host__  void fillHashTable(LLNode **hashTable, uint32_t hash, LLNode *node) {
+//extern "C" 
+__device__ __host__  void fillHashTable(LLNode **hashTable, unsigned int hash, LLNode *node) {
     LLNode *head = hashTable[hash];
     if(head == NULL) {
         hashTable[hash] = head;
@@ -126,7 +126,7 @@ __device__ __host__  void fillHashTable(LLNode **hashTable, uint32_t hash, LLNod
     }
 }
 
-extern "C" 
+//extern "C" 
 __device__ __host__  LLNode* findMatchingNode(LLNode* head, FileContent content) {
     LLNode *node = head;
     while(node) {
@@ -151,10 +151,10 @@ __device__ __host__  LLNode* findMatchingNode(LLNode* head, FileContent content)
     return NULL;
 }
 
-extern "C"
+//extern "C"
  __device__ __host__  double getScoreFromHashTable(LLNode **hashTable) {
     double euclidDist = 0;
-    for(uint32_t i = 0; i < MAX_HASH_TABLE_ENTRIES; i++) {
+    for(unsigned int i = 0; i < MAX_HASH_TABLE_ENTRIES; i++) {
         LLNode *node = hashTable[i];
         while(node) {
             HNode *hnode = (HNode *) node->data;            
@@ -166,32 +166,22 @@ extern "C"
     return sqrt((double) euclidDist);
 }
 
-extern "C" 
-__device__ __host__ uint32_t isMatch(unsigned char *term1, unsigned char *term2) {
+
+unsigned int isMatch(unsigned char *term1, unsigned char *term2) {
     while(*term1 == *term2) {
-        if(*term1 == '\0') return 1;
+        if(*term1 == '\0' || *term1 == ' ') return 1;
         term1++; term2++;
     }
     
     return 0;
 }
 
-extern "C" 
-__device__ __host__ uint32_t findTerm(TermVector *vector, uint32_t used, unsigned char *term) {
-    for(int32_t i = 0; i < used; i++) {
-        if(isMatch(vector[used].term, term)) {
-            return i;
-        }
-    }
 
-    return (unsigned int)-1;
-}
-
-extern "C"
-__device__ __host__  void printVector(TermVector *vector, uint32_t used) {
-    for(int32_t i = 0; i < used; i++) {
-        uint32_t j=0;
-        while(vector[i].term[j] != '\0') {
+void printVector(TermVector *vector, unsigned int used) {
+    unsigned int i;
+    for(i = 0; i < used; i++) {
+        unsigned int j=0;
+        while(vector[i].term[j] != ' ' && vector[i].term[j] != '\0') {
             printf("%c", vector[i].term[j]);
             j++;
         }
@@ -199,14 +189,23 @@ __device__ __host__  void printVector(TermVector *vector, uint32_t used) {
     }
 }
 
-extern "C"
-void ggetScore(FileContent   content1, 
-                           unsigned int  letterCount1, 
-                           FileContent   content2, 
-                           unsigned int  letterCount2) {
-    TermVector vector1[1]; 
-    uint32_t i = 0, startIdx = (unsigned int)-1, used = 0;
+unsigned int findIndex(TermVector *vector1, unsigned int vector1Count, FileContent term) {
+    unsigned int j;
+    for(j = 0; j < vector1Count; j++) {
+        if(isMatch(vector1[j].term, term)) {
+            return j;
+        }
+    }
 
+    return (unsigned int) -1;
+}
+
+#define VECTOR_SIZE 1000
+void getVector(FileContent   content1, 
+                unsigned int  letterCount1,
+                TermVector *vector1,
+                unsigned int *used) {
+    unsigned int i = 0, startIdx = (unsigned int)-1;
     for(; i < letterCount1; i++) {
         if(content1[i] != ' ') {
             startIdx = (startIdx == (unsigned int)-1) ? i : startIdx;
@@ -218,19 +217,87 @@ void ggetScore(FileContent   content1,
         }
 
 
-        uint32_t index = findTerm(vector1, used, content1+startIdx);
+        unsigned int index = findIndex(vector1, *used, content1+startIdx);
         if(index == (unsigned int)-1) {
-            vector1[used].term = content1+i;
-            vector1[used].count = 1;
+            assert(*used < VECTOR_SIZE);
+            vector1[*used].term = content1+startIdx;
+            vector1[*used].count = 1;
+            (*used)++;
         } else {
             vector1[index].count++;
         }
+        startIdx = (unsigned int)-1;
     }
 
-    printVector(vector1, used);
+    if(startIdx != -1) {
+        unsigned int index = findIndex(vector1, *used, content1+startIdx);
+        if(index == (unsigned int)-1) {
+            assert(*used < VECTOR_SIZE);
+            vector1[*used].term = content1+startIdx;
+            vector1[*used].count = 1;
+            (*used)++;
+        } else {
+            vector1[index].count++;
+        }
+        
+    }
 }
 
-extern "C"
+unsigned int getADotB(TermVector *vector1, 
+                      unsigned int vector1Count,
+                      TermVector *vector2,
+                      unsigned int vector2Count) {
+    unsigned int i;
+    unsigned int aDotb = 0;
+    for(i = 0; i < vector1Count; i++) {
+        unsigned int index = findIndex(vector2, vector2Count, vector1[i].term);
+        if(index != (unsigned int)-1) {
+            aDotb += vector1[i].count * vector2[index].count;
+        }
+    }
+
+    return aDotb;
+}
+
+double modOfVector(TermVector *vector, unsigned int vectorCount) {
+    unsigned int i;
+    unsigned int modValue = 0;
+    for(i = 0; i < vectorCount; i++) {
+        modValue += vector[i].count * vector[i].count;
+    }
+
+    return sqrt(modValue);
+}
+
+double ggetScore(FileContent   content1, 
+                           unsigned int  letterCount1, 
+                           FileContent   content2, 
+                           unsigned int  letterCount2) {
+    TermVector vector[VECTOR_SIZE]={}; 
+    unsigned int used = 0, vector1Count, vector2Count;
+
+    TermVector *vector1 = vector;
+    getVector(content1, letterCount1, vector, &used);
+    printVector(vector1, used);
+    vector1Count = used;
+
+    printf("==================================================\n\n\n");
+
+    used = 0;
+    TermVector *vector2 = vector + vector1Count;
+    getVector(content2, letterCount2, vector2, &used);
+    vector2Count = used;
+    printVector(vector2, vector2Count);
+
+    assert((vector1Count + vector2Count) < VECTOR_SIZE);
+
+    unsigned int dotProduct = getADotB(vector1, vector1Count, vector2, vector2Count); 
+    double magA = modOfVector(vector1, vector1Count);
+    double magB = modOfVector(vector2, vector2Count);
+    return (double)dotProduct/(magA * magB);
+}
+
+//extern "C"
 __device__ 
 __host__  double getScore(FileContent   content1, 
                            unsigned int  letterCount1, 
@@ -239,7 +306,7 @@ __host__  double getScore(FileContent   content1,
     LLNode *hashTable[MAX_HASH_TABLE_ENTRIES] = {};
     
     int i = 0, startIdx=-1;
-    HNode nodes[MAX_NODES_IN_HASH_TABLE]; uint32_t used = 0;
+    HNode nodes[MAX_NODES_IN_HASH_TABLE]; unsigned int used = 0;
     unsigned char currentSrc = 1;
     for(;i<letterCount1;i++) {
         if(content1[i] != ' ') {
@@ -326,7 +393,7 @@ __host__  double getScore(FileContent   content1,
     return getScoreFromHashTable(hashTable);
 }
 
-extern "C"
+//extern "C"
 __global__ void sq(FileContent   fileContent, 
                    BigBoy        fileSize, 
                    BigBoy        n,
@@ -347,7 +414,7 @@ __global__ void sq(FileContent   fileContent,
     preprocess(fileContent, myIdx, myLimit);
     __syncthreads();
 
-    uint32_t firstChunk, secondChunk, i, j, k = 0; 
+    unsigned int firstChunk, secondChunk, i, j, k = 0; 
     for(i = 0; i <= (n-1-1); i++) {
         for(j = i+1; j <= (n-1); j++) {
             if(myIdx == k) {
@@ -377,9 +444,9 @@ __global__ void sq(FileContent   fileContent,
     }
 
     if(myIdx >= n) return;
-    uint32_t start = (myIdx*n - (myIdx*(myIdx+1))/2);
-    uint32_t end   = ((myIdx+1)*n - ((myIdx+1)*(myIdx+2))/2)
-    uint32_t max = dScores[start], maxIndex = start;
+    unsigned int start = (myIdx*n - (myIdx*(myIdx+1))/2);
+    unsigned int end   = ((myIdx+1)*n - ((myIdx+1)*(myIdx+2))/2)
+    unsigned int max = dScores[start], maxIndex = start;
     for(i = start; i < end; i++) {
        if(dScores[i] > max) {
             max = dScores[i];
@@ -390,7 +457,7 @@ __global__ void sq(FileContent   fileContent,
     dScores[start] = maxIndex; */
 }
 
-extern "C"
+//extern "C"
 size_t getFilesize(FileName filename) {
     struct stat st;
     if(stat((const char *)filename, &st) != 0) {
@@ -399,7 +466,7 @@ size_t getFilesize(FileName filename) {
     return st.st_size;   
 }
 
-extern "C"
+//extern "C"
 void getFileContent(FileName filename, FileContent buffer) {
 FILE *file;
 size_t nread;
@@ -431,7 +498,7 @@ inline void __checkCudaErrors(int err, const char *file, const int line)
 }
 #endif
 
-extern "C"
+//extern "C"
 int main(int argc, char *argv[]) {
 
     filename = (unsigned char *) "/home/anand/Desktop/hemanth/phase2/mcgpu/text8";
@@ -476,10 +543,10 @@ int main(int argc, char *argv[]) {
     checkCudaErrors(cudaFree(dSyncBuffer));
 */
 
-    ggetScore(hostFileBuffer, 
+    hScores[0] = ggetScore(hostFileBuffer, 
                             chunkSize, 
                             hostFileBuffer + 1*chunkSize, 
-                            chunkSize);
+                            min(chunkSize, filesize - chunkSize));
     //hScores[0] = score;
 
     for(int i = 0; i < nc2; i++) {
@@ -487,14 +554,14 @@ int main(int argc, char *argv[]) {
     }
 
 /*
-    uint32_t hostOrderInfo[100]={};
+    unsigned int hostOrderInfo[100]={};
     hostOrderInfo[0] = 0;
     lastFilled = 0;
-    for(uint32_t i = 1; i < n; i++) {
-        uint32_t start = (lastFilled      * n - (lastFilled       * (lastFilled + 1))/2);
-        uint32_t end =   (lastFilled + 1) * n - ((lastFilled + 1) * (lastFilled + 2))/2;
+    for(unsigned int i = 1; i < n; i++) {
+        unsigned int start = (lastFilled      * n - (lastFilled       * (lastFilled + 1))/2);
+        unsigned int end =   (lastFilled + 1) * n - ((lastFilled + 1) * (lastFilled + 2))/2;
 
-        uint32_t j = 1, bestMatch;
+        unsigned int j = 1, bestMatch;
         while(1) {
             bestMatch = lastFilled + getKthbestMatch(hScores + start, end - start, j);
             uint8_t  isFilled  = isAlreadyFilled(hostOrderInfo, i, bestMatch);
