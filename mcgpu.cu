@@ -35,7 +35,7 @@ typedef struct chunkOrder ChunkOrder;
 // Global variables
 FileName filename;
 
-__device__ __host__  void preprocess(FileContent   fileContent, int myIdx, int myLimit) {
+__device__ __host__  void preprocess(FileContent   fileContent, unsigned int myIdx, unsigned int myLimit) {
     for(unsigned int i = myIdx; i < myLimit; i++) {
         switch(fileContent[i]) {
             case '.':
@@ -171,16 +171,28 @@ __global__ void sq(FileContent   fileContent,
                    TermVector*   dTermVector,
                    unsigned int* dUsedArr)
 {
-    dSyncBuffer[0] = 0;
+    unsigned int myIdx = blockIdx.x * blockDim.x + threadIdx.x;
+    if(noOfChunks <= myIdx) return;
+
+    preprocess(fileContent, myIdx * chunkSize, min(fileSize, (myIdx+1) * chunkSize));
     __syncthreads();
 
-    int myIdx = blockIdx.x * blockDim.x + threadIdx.x;
-    int myLimit = myIdx + chunkSize;
-    int nc2 = findNC2(noOfChunks);
+    unsigned int used = 0;
+    TermVector *myVector = dTermVector + myIdx * TERMS_PER_CHUNK;
+    getVector(fileContent + myIdx * chunkSize, 
+              min(chunkSize, fileSize - myIdx * chunkSize),
+              myVector,
+              &used);
+    dUsedArr[myIdx] = used;
+}
+
+__global__ void computeScore(TermVector*   dTermVector,
+                             unsigned int* dUsedArr,
+                             BigBoy        noOfChunks,
+                             double*       dScores) {
+    unsigned int myIdx = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int nc2 = findNC2(noOfChunks);
     if(nc2 <= myIdx) return;
-
-    preprocess(fileContent, myIdx, myLimit);
-    __syncthreads();
 
     unsigned int firstChunk, secondChunk, i, j, k = 0; 
     for(i = 0; i <= (noOfChunks-1-1); i++) {
@@ -195,21 +207,6 @@ __global__ void sq(FileContent   fileContent,
         }
     } 
 
-    __syncthreads();
-
-    if(myIdx < noOfChunks) {
-        unsigned int used = 0;
-        TermVector *myVector = dTermVector + myIdx * TERMS_PER_CHUNK;
-        getVector(fileContent + myIdx*chunkSize, 
-                  min(chunkSize,fileSize-myIdx*chunkSize),
-                  myVector,
-                  &used);
-        dUsedArr[myIdx] = used;
-        atomicAdd(&dSyncBuffer[0], 1);
-    }
-
-    while(dSyncBuffer[0] == noOfChunks);
-
     double score = getScore(dTermVector + firstChunk * TERMS_PER_CHUNK,
                             dUsedArr[firstChunk],
                             dTermVector + secondChunk * TERMS_PER_CHUNK,
@@ -217,6 +214,36 @@ __global__ void sq(FileContent   fileContent,
     dScores[myIdx] = score;
 }
 
+__device__ void iSort(double *arr, unsigned int n) {
+    unsigned int i, j;
+    for(i = 1; i < n; i++) {
+        double tmp = arr[i];
+        for(j = i - 1; j >= 0; j--) {
+            if(arr[j] < tmp) {
+                break;
+            }
+            arr[j+1] = arr[j];
+        }
+        arr[j+1] = tmp;
+    }
+}
+
+#define sumOfN(n) ((n) *((n)+1))/2
+
+__global__ void sortScores(double*       dScores,
+                           BigBoy        noOfChunks) {
+    unsigned int myIdx = blockIdx.x * blockDim.x + threadIdx.x;
+    if(noOfChunks <= myIdx) return;
+
+    unsigned int startIndex = 0, n = noOfChunks - 1;
+    for(unsigned int i = 0; i < myIdx; i++) {
+        startIndex += n;
+        n--;
+    }
+
+    iSort(dScores + startIndex, n);
+}
+                              
 size_t getFilesize(FileName filename) {
     struct stat st;
     if(stat((const char *)filename, &st) != 0) {
@@ -297,6 +324,8 @@ int main(int argc, char *argv[]) {
 
     printf("Launching CUDA kernal\n");
 
+    noOfBlocks = ceil((double)noOfChunks/(double)32);
+    threadsPerBlock = 32;
     sq<<<noOfBlocks, threadsPerBlock>>>(deviceFileBuffer, 
                                         filesize, 
                                         noOfChunks, 
@@ -305,6 +334,14 @@ int main(int argc, char *argv[]) {
                                         dSyncBuffer, 
                                         dVector,
                                         dUsedArr);
+    
+    noOfBlocks = ceil((double)nc2/(double)256);;
+    threadsPerBlock = 256;
+    computeScore<<<noOfBlocks, threadsPerBlock>>>(dVector, dUsedArr, noOfChunks, dScores);
+
+    noOfBlocks = ceil((double)noOfChunks/(double)32);
+    threadsPerBlock = 32;
+    sortScores<<<noOfBlocks, threadsPerBlock>>>(dScores, noOfChunks);
 
     checkCudaErrors(cudaMemcpy(hScores, dScores, sizeof(double)*nc2, cudaMemcpyDeviceToHost));
     printf("CUDA kernel execution over !!!\n");
