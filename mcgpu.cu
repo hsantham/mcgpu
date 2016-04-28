@@ -90,7 +90,7 @@ __device__ unsigned int findIndex(TermVector *vector1, unsigned int vector1Count
     return (unsigned int) -1;
 }
 
-#define VECTOR_SIZE 1000
+#define VECTOR_SIZE 1300
 __device__ void getVector(FileContent   content1, 
                 unsigned int  letterCount1,
                 TermVector *vector1,
