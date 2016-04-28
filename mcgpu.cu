@@ -23,6 +23,13 @@ struct termvector {
     unsigned short count;
 };
 
+struct scores {
+    double score;
+    unsigned int index;
+};
+
+typedef struct scores SCORE;
+
 typedef struct termvector TermVector;
 
 __device__ __host__   BigBoy findNC2(int n) {
@@ -33,7 +40,7 @@ return ((n * (n-1))/2);
 typedef struct chunkOrder ChunkOrder;
 
 // Global variables
-FileName filename;
+FileName filename, outputFilename;
 
 __device__ __host__  void preprocess(FileContent   fileContent, unsigned int myIdx, unsigned int myLimit) {
     for(unsigned int i = myIdx; i < myLimit; i++) {
@@ -166,7 +173,7 @@ __global__ void sq(FileContent   fileContent,
                    BigBoy        fileSize, 
                    BigBoy        noOfChunks,
                    BigBoy        chunkSize,
-                   double*       dScores,
+                   SCORE*        dScores,
                    unsigned int* dSyncBuffer,
                    TermVector*   dTermVector,
                    unsigned int* dUsedArr)
@@ -186,13 +193,13 @@ __global__ void sq(FileContent   fileContent,
     dUsedArr[myIdx] = used;
 
     if(myIdx == 0) 
-        memset(dScores, 0, sizeof(double)*noOfChunks*noOfChunks);
+        memset(dScores, 0, sizeof(SCORE)*noOfChunks*noOfChunks);
 }
 
 __global__ void computeScore(TermVector*   dTermVector,
                              unsigned int* dUsedArr,
                              BigBoy        noOfChunks,
-                             double*       dScores) {
+                             SCORE*        dScores) {
     unsigned int myIdx = blockIdx.x * blockDim.x + threadIdx.x;
     unsigned int nc2 = findNC2(noOfChunks);
     if(nc2 <= myIdx) return;
@@ -214,16 +221,18 @@ __global__ void computeScore(TermVector*   dTermVector,
                             dUsedArr[firstChunk],
                             dTermVector + secondChunk * TERMS_PER_CHUNK,
                             dUsedArr[secondChunk]);
-    dScores[firstChunk * noOfChunks + secondChunk] = score;
-    dScores[secondChunk * noOfChunks + firstChunk] = score;
+    dScores[firstChunk * noOfChunks + secondChunk].score = score;
+    dScores[firstChunk * noOfChunks + secondChunk].index = secondChunk;
+    dScores[secondChunk * noOfChunks + firstChunk].score = score;
+    dScores[secondChunk * noOfChunks + firstChunk].index = firstChunk;
 }
 
-__device__ void iSort(double *arr, unsigned int n) {
+__device__ void iSort(SCORE *arr, unsigned int n) {
     int i, j;
     for(i = 1; i < n; i++) {
-        double tmp = arr[i];
+        SCORE tmp = arr[i];
         for(j = i - 1; j >= 0; j--) {
-            if(arr[j] < tmp) {
+            if(arr[j].score < tmp.score) {
                 break;
             }
             arr[j+1] = arr[j];
@@ -234,7 +243,7 @@ __device__ void iSort(double *arr, unsigned int n) {
 
 #define sumOfN(n) ((n) *((n)+1))/2
 
-__global__ void sortScores(double*       dScores,
+__global__ void sortScores(SCORE*       dScores,
                            BigBoy        noOfChunks) {
     unsigned int myIdx = blockIdx.x * blockDim.x + threadIdx.x;
     if(myIdx >= noOfChunks) return;
@@ -242,6 +251,46 @@ __global__ void sortScores(double*       dScores,
     iSort(dScores + myIdx * noOfChunks, noOfChunks);
 }
                               
+__device__ unsigned int findIndex(SCORE*       dScores,
+                                  unsigned int n,
+                                  BigBoy        noOfChunks,
+                                  unsigned int kthBest) {
+    return dScores[n*noOfChunks + kthBest].index;
+}
+
+__device__ unsigned int isAlreadyThere(unsigned int *order,
+                                       unsigned int n,
+                                       unsigned int index) {
+    for(unsigned int i = 0; i<n; i++) {
+        if(order[i] == index) return 1;
+    }
+
+    return 0;
+}
+
+__global__ void getOrder(SCORE*       dScores,
+                         BigBoy        noOfChunks) {
+    unsigned int *order = (unsigned int *) malloc(sizeof(unsigned int) * noOfChunks);
+    unsigned int i, k;
+    order[0] = 0;
+    for(i=1; i<noOfChunks; i++) {
+        k=0;
+        while(1) {
+            unsigned int index = findIndex(dScores, order[i-1], noOfChunks, k);
+            if(!isAlreadyThere(order, i, index)) {
+                order[i] = index;
+                break;
+            }
+            k++;
+        }
+    }
+
+    for(i = 0; i < noOfChunks; i++) {
+        dScores[i].score = order[i];
+        dScores[i].index = order[i];
+    }
+}
+
 size_t getFilesize(FileName filename) {
     struct stat st;
     if(stat((const char *)filename, &st) != 0) {
@@ -285,6 +334,7 @@ inline void __checkCudaErrors(int err, const char *file, const int line)
 int main(int argc, char *argv[]) {
 
     filename = (unsigned char *) "/home/anand/Desktop/hemanth/phase2/mcgpu/text8";
+    outputFilename = (unsigned char *) "/home/anand/Desktop/hemanth/phase2/mcgpu/otext8";
 
     FileContent deviceFileBuffer, hostFileBuffer, reorderedFileBuffer;
     BigBoy filesize = getFilesize(filename);
@@ -300,21 +350,21 @@ int main(int argc, char *argv[]) {
     printf("nc2 = %llu;       threadsPerBlock = %u; no of Blocks = %u; \n", nc2, threadsPerBlock, noOfBlocks);
 
     ChunkOrder *hostReorderInfo;
-    double *hScores;
+    SCORE *hScores;
     hostFileBuffer = (FileContent) malloc(filesize+1);
     reorderedFileBuffer = (FileContent) malloc(filesize+1);
     getFileContent(filename, hostFileBuffer);
 
     hostReorderInfo = (ChunkOrder *) malloc(sizeof(ChunkOrder)*noOfChunks);
-    hScores = (double *) malloc(sizeof(double)*noOfChunks*noOfChunks);
+    hScores = (SCORE *) malloc(sizeof(SCORE)*noOfChunks*noOfChunks);
     assert(hScores != NULL);
 
     ChunkOrder *deviceReorderInfo;
-    double *dScores;
+    SCORE *dScores;
     unsigned int *dSyncBuffer, *dUsedArr;
     TermVector *dVector;
     checkCudaErrors(cudaMalloc((void **)&deviceFileBuffer, filesize));
-    checkCudaErrors(cudaMalloc((void **)&dScores, sizeof(double)*noOfChunks*noOfChunks));
+    checkCudaErrors(cudaMalloc((void **)&dScores, sizeof(SCORE)*noOfChunks*noOfChunks));
     checkCudaErrors(cudaMalloc((void **)&dSyncBuffer, sizeof(unsigned int)*10));
     checkCudaErrors(cudaMalloc((void **)&dVector, noOfChunks * TERMS_PER_CHUNK * sizeof(TermVector)));
     checkCudaErrors(cudaMalloc((void **)&dUsedArr, noOfChunks * sizeof(unsigned int)));
@@ -340,11 +390,13 @@ int main(int argc, char *argv[]) {
 
     noOfBlocks = ceil((double)noOfChunks/(double)32);
     threadsPerBlock = 32;
-//    sortScores<<<noOfBlocks, threadsPerBlock>>>(dScores, noOfChunks);
+    sortScores<<<noOfBlocks, threadsPerBlock>>>(dScores, noOfChunks);
+
+    getOrder<<<1,1>>>(dScores, noOfChunks);
 
     checkCudaErrors(cudaMemcpy(hScores, 
                                dScores, 
-                               sizeof(double)*noOfChunks*noOfChunks, 
+                               sizeof(SCORE)*noOfChunks, 
                                cudaMemcpyDeviceToHost));
     printf("CUDA kernel execution over !!!\n");
 
@@ -361,11 +413,26 @@ int main(int argc, char *argv[]) {
     unsigned int i, j;
     for(i = 0; i < noOfChunks; i++) {
         for(j = 0; j < noOfChunks; j++) {
-            printf("%.4lf",hScores[i*noOfChunks + j]);           
+            printf("%.4lf,%u",hScores[i*noOfChunks + j].score, hScores[i*noOfChunks + j].index);
             printf(" ");
         }
         printf("\n");
+        break;
     }
+
+    // open file descriptor
+    FILE *file;
+    file = fopen((const char *)outputFilename, "w");
+    assert(file != NULL);
+
+    size_t written;
+    for(i = 0; i < noOfChunks; i++) {
+        written = fwrite(hostFileBuffer + hScores[i].index * chunkSize, 1, chunkSize, file);
+        assert(written == chunkSize);
+        assert(ferror(file) == 0);
+    }
+
+    fclose(file);
 
     return 0;
 }
