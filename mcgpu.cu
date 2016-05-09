@@ -8,7 +8,7 @@
 #define TERMS_PER_CHUNK 1000
 
 // TYPE DEFs
-typedef unsigned char * FileName;
+typedef char * FileName;
 typedef unsigned char * FileContent;
 typedef unsigned long long int BigBoy;
 
@@ -90,6 +90,13 @@ __device__ unsigned int findIndex(TermVector *vector1, unsigned int vector1Count
     return (unsigned int) -1;
 }
 
+__device__ unsigned int findLength(FileContent   content) {
+        unsigned int i = 0;
+        while(content[i] != ' ' && content[i] != '\0')
+                i++;
+        return i;
+}
+
 #define VECTOR_SIZE 1300
 __device__ void getVector(FileContent   content1, 
                 unsigned int  letterCount1,
@@ -122,10 +129,12 @@ __device__ void getVector(FileContent   content1,
     if(startIdx != (unsigned int)-1) {
         unsigned int index = findIndex(vector1, *used, content1+startIdx);
         if(index == (unsigned int)-1) {
-            assert(*used < VECTOR_SIZE);
-            vector1[*used].term = content1+startIdx;
-            vector1[*used].count = 1;
-            (*used)++;
+            if(findLength(content1+startIdx) >= 3) {
+                assert(*used < VECTOR_SIZE);
+                vector1[*used].term = content1+startIdx;
+                vector1[*used].count = 1;
+                (*used)++;
+            }
         } else {
             vector1[index].count++;
         }
@@ -176,12 +185,14 @@ __global__ void sq(FileContent   fileContent,
                    SCORE*        dScores,
                    unsigned int* dSyncBuffer,
                    TermVector*   dTermVector,
-                   unsigned int* dUsedArr)
+                   unsigned int* dUsedArr,
+                   unsigned int preprocessing)
 {
     unsigned int myIdx = blockIdx.x * blockDim.x + threadIdx.x;
     if(noOfChunks <= myIdx) return;
 
-    preprocess(fileContent, myIdx * chunkSize, min(fileSize, (myIdx+1) * chunkSize));
+    if(preprocessing)
+        preprocess(fileContent, myIdx * chunkSize, min(fileSize, (myIdx+1) * chunkSize));
     __syncthreads();
 
     unsigned int used = 0;
@@ -232,7 +243,7 @@ __device__ void iSort(SCORE *arr, unsigned int n) {
     for(i = 1; i < n; i++) {
         SCORE tmp = arr[i];
         for(j = i - 1; j >= 0; j--) {
-            if(arr[j].score < tmp.score) {
+            if(arr[j].score > tmp.score) {
                 break;
             }
             arr[j+1] = arr[j];
@@ -268,8 +279,43 @@ __device__ unsigned int isAlreadyThere(unsigned int *order,
     return 0;
 }
 
+__device__ int isIndex32kApart(unsigned int index1, unsigned int index2, BigBoy chunksize) {
+       if(index1 > index2) 
+               return ((index1 - index2) *chunksize) >= 32506;
+
+       return ((index2 - index1) *chunksize) >= 32506;
+}
+
+#define dabs(a,b) ((a)>(b)?(a-b):(b-a))
+
+__device__ int findUnusedNearestIndex(unsigned int *order, unsigned int soFarFilled, unsigned int index, unsigned int noOfChunks) {
+        unsigned int min = (unsigned int) -1;
+        for(unsigned int i=0; i < noOfChunks; i++) {
+                if(i == index) continue;
+                
+                unsigned int continuee = 0;
+                for(unsigned int k = 0; k < soFarFilled; k++) {
+                        if(order[k] == i) {continuee=1; break;}
+                }
+                if(continuee == 1) continue;
+
+                if(min == (unsigned int)-1) 
+                {
+                        min = i;
+                }
+
+                if(dabs(min, index) > dabs(i, index))
+                {
+                        min = i;        
+                }
+        }
+
+        return min;
+}
 __global__ void getOrder(SCORE*       dScores,
-                         BigBoy        noOfChunks) {
+                         BigBoy        noOfChunks,
+                         BigBoy        chunksize,
+                         float  threshold) {
     unsigned int *order = (unsigned int *) malloc(sizeof(unsigned int) * noOfChunks);
     unsigned int i, k;
     order[0] = 0;
@@ -277,11 +323,18 @@ __global__ void getOrder(SCORE*       dScores,
         k=0;
         while(1) {
             unsigned int index = findIndex(dScores, order[i-1], noOfChunks, k);
-            if(!isAlreadyThere(order, i, index)) {
+            if((dScores[order[i-1] * noOfChunks + index].score > (double)threshold) &&
+               !isAlreadyThere(order, i, index) && isIndex32kApart(order[i-1], index, chunksize)) {
                 order[i] = index;
                 break;
             }
             k++;
+
+            if(k == noOfChunks) {
+                index = findUnusedNearestIndex(order, i-1, order[i-1], noOfChunks);
+                order[i] = index;
+                break;
+            }
         }
     }
 
@@ -331,16 +384,63 @@ inline void __checkCudaErrors(int err, const char *file, const int line)
 }
 #endif
 
+void preprocessFileForSpace(char *inputFile, char *outputFile, unsigned int chunkSize) {
+    FILE *file;
+    size_t nread;
+
+    file = fopen((const char *)inputFile, "r");
+    assert(file != NULL);
+
+    BigBoy filesize = getFilesize(inputFile);
+    char *buffer = (char *) malloc(filesize+1);
+    char *temp = buffer;
+    assert(buffer != NULL);
+    
+    nread = fread(buffer, 1, filesize, file);
+    assert(nread == filesize);
+    assert(ferror(file) == 0);
+
+    fclose(file);
+
+    file = fopen((const char *)outputFile, "w");
+    assert(file != NULL);
+
+    BigBoy noOfChunks = (int) ceil(((double)filesize/(double)chunkSize));
+    size_t written;
+    for(unsigned int i = 0; i < noOfChunks; i++) {
+        unsigned int bytesToWrite = min(chunkSize, (unsigned int) filesize - i * chunkSize);
+        buffer[bytesToWrite - 1] = ' ';
+        written = fwrite(buffer, 1, bytesToWrite, file);
+        assert(written == bytesToWrite);
+        assert(ferror(file) == 0);
+
+        buffer += written;
+    }
+
+    fclose(file);
+
+    free(temp);
+}
+
 int main(int argc, char *argv[]) {
 
-    filename = (unsigned char *) "/home/anand/Desktop/hemanth/phase2/mcgpu/text8";
-    outputFilename = (unsigned char *) "/home/anand/Desktop/hemanth/phase2/mcgpu/otext8";
+    filename = (char *) "text8";
+    FileName pfilename = ( char *) "ptext8";
+    outputFilename = (char *) "otext8";
+
+    BigBoy chunkSize = (argc < 2) ? 1024 : atoi(argv[1]);
+    float threshold = (argc < 3) ? 0.0 : atof(argv[2]);
+    int doPreprocess = (argc < 4) ? 1 : atoi(argv[3]);
+    if(doPreprocess)
+    {
+        printf("Pre-processing ptext -> text8\n");
+        preprocessFileForSpace(pfilename, filename, chunkSize);
+    }
 
     FileContent deviceFileBuffer, hostFileBuffer, reorderedFileBuffer;
     BigBoy filesize = getFilesize(filename);
     printf("%llu\n\n", filesize);    
 
-    BigBoy chunkSize = (argc == 1) ? 1024 : atoi(argv[1]);
     BigBoy noOfChunks = (int) ceil(((double)filesize/(double)chunkSize));
     BigBoy nc2 = findNC2(noOfChunks);
     unsigned int threadsPerBlock = 1024;
@@ -382,22 +482,67 @@ int main(int argc, char *argv[]) {
                                         dScores, 
                                         dSyncBuffer, 
                                         dVector,
-                                        dUsedArr);
+                                        dUsedArr, doPreprocess);
     
     noOfBlocks = ceil((double)nc2/(double)256);;
     threadsPerBlock = 256;
     computeScore<<<noOfBlocks, threadsPerBlock>>>(dVector, dUsedArr, noOfChunks, dScores);
 
+    printf("After Comppute score\n");
+    unsigned int i, j;
+#define PRINT_DEBUG 1
+#ifdef PRINT_DEBUG
+    checkCudaErrors(cudaMemcpy(hScores, 
+                               dScores, 
+                               sizeof(SCORE)*noOfChunks*noOfChunks, 
+                               cudaMemcpyDeviceToHost));
+    if(noOfChunks <= 10) {
+    for(i = 0; i < noOfChunks; i++) {
+        for(j = 0; j < noOfChunks; j++) {
+            printf("%lf,%u",hScores[i*noOfChunks + j].score, hScores[i*noOfChunks + j].index);
+            printf(" ");
+        }
+        printf("\n");
+    }
+    }
+#endif
+
     noOfBlocks = ceil((double)noOfChunks/(double)32);
     threadsPerBlock = 32;
     sortScores<<<noOfBlocks, threadsPerBlock>>>(dScores, noOfChunks);
 
-    getOrder<<<1,1>>>(dScores, noOfChunks);
-
+    printf("After sort score\n");
+#ifdef PRINT_DEBUG
     checkCudaErrors(cudaMemcpy(hScores, 
                                dScores, 
-                               sizeof(SCORE)*noOfChunks, 
+                               sizeof(SCORE)*noOfChunks*noOfChunks, 
                                cudaMemcpyDeviceToHost));
+    if(noOfChunks <= 10) {
+    for(i = 0; i < noOfChunks; i++) {
+        for(j = 0; j < noOfChunks; j++) {
+            printf("%lf,%u",hScores[i*noOfChunks + j].score, hScores[i*noOfChunks + j].index);
+            printf(" ");
+        }
+        printf("\n");
+    }
+    }
+#endif
+
+    getOrder<<<1,1>>>(dScores, noOfChunks, chunkSize, threshold);
+
+    printf("After get order\n");
+    checkCudaErrors(cudaMemcpy(hScores, 
+                               dScores, 
+                               sizeof(SCORE)*noOfChunks*noOfChunks, 
+                               cudaMemcpyDeviceToHost));
+    for(i = 0; i < noOfChunks; i++) {
+        for(j = 0; j < noOfChunks; j++) {
+            printf("%u ", hScores[i*noOfChunks + j].index);
+        }
+        printf("\n");
+        break;
+    }
+
     printf("CUDA kernel execution over !!!\n");
 
     checkCudaErrors(cudaFree(deviceFileBuffer));
@@ -410,15 +555,6 @@ int main(int argc, char *argv[]) {
                             min(chunkSize, filesize - chunkSize));
 */
 
-    unsigned int i, j;
-    for(i = 0; i < noOfChunks; i++) {
-        for(j = 0; j < noOfChunks; j++) {
-            printf("%.4lf,%u",hScores[i*noOfChunks + j].score, hScores[i*noOfChunks + j].index);
-            printf(" ");
-        }
-        printf("\n");
-        break;
-    }
 
     // open file descriptor
     FILE *file;
@@ -427,8 +563,9 @@ int main(int argc, char *argv[]) {
 
     size_t written;
     for(i = 0; i < noOfChunks; i++) {
-        written = fwrite(hostFileBuffer + hScores[i].index * chunkSize, 1, chunkSize, file);
-        assert(written == chunkSize);
+        unsigned int bytesToWrite = min(chunkSize, filesize - hScores[i].index * chunkSize);
+        written = fwrite(hostFileBuffer + hScores[i].index * chunkSize, 1, bytesToWrite, file);
+        assert(written == bytesToWrite);
         assert(ferror(file) == 0);
     }
 
