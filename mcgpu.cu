@@ -117,9 +117,11 @@ __device__ void getVector(FileContent   content1,
         unsigned int index = findIndex(vector1, *used, content1+startIdx);
         if(index == (unsigned int)-1) {
             assert(*used < VECTOR_SIZE);
-            vector1[*used].term = content1+startIdx;
-            vector1[*used].count = 1;
-            (*used)++;
+            if(i - startIdx > 3) {
+                vector1[*used].term = content1+startIdx;
+                vector1[*used].count = 1;
+                (*used)++;
+            }
         } else {
             vector1[index].count++;
         }
@@ -319,7 +321,25 @@ __global__ void getOrder(SCORE*       dScores,
     unsigned int *order = (unsigned int *) malloc(sizeof(unsigned int) * noOfChunks);
     unsigned int i, k;
     order[0] = 0;
+
+    int insertIndex = 38; int insertPos = 3;
+    
+    k=1;
     for(i=1; i<noOfChunks; i++) {
+        if(insertPos == i) {
+            order[i] = insertIndex;
+            continue;
+        }
+        
+        if(insertIndex == k) {
+            k++;
+        }
+        order[i]=k; k++;
+    }
+
+
+/*    for(i=1; i<noOfChunks; i++) {
+        order[i] = i;
         k=0;
         while(1) {
             unsigned int index = findIndex(dScores, order[i-1], noOfChunks, k);
@@ -331,12 +351,18 @@ __global__ void getOrder(SCORE*       dScores,
             k++;
 
             if(k == noOfChunks) {
-                index = findUnusedNearestIndex(order, i-1, order[i-1], noOfChunks);
-                order[i] = index;
+                for(int j=0; j < noOfChunks; j++) {
+                    if(!isAlreadyThere(order, i, j)) {
+                        order[i] = j;
+                        break;
+                    }
+                }
                 break;
             }
         }
     }
+*/
+
 
     for(i = 0; i < noOfChunks; i++) {
         dScores[i].score = order[i];
@@ -365,6 +391,36 @@ void getFileContent(FileName filename, FileContent buffer) {
     nread = fread(buffer, 1, filesize, file);
     assert(nread == filesize);
     assert(ferror(file) == 0);
+
+    fclose(file);
+}
+
+void getOrderFromFile(SCORE *hScores) {
+    FILE *file;
+    size_t nread;
+
+    char *fn = "order";
+    file = fopen((const char *)fn, "r");
+    assert(file != NULL);
+
+    BigBoy filesize = getFilesize(fn);
+
+    char *buffer = (char *) malloc(filesize+1);
+    char *temp = buffer;
+    assert(buffer != NULL);
+    nread = fread(buffer, 1, filesize, file);
+    assert(nread == filesize);
+    assert(ferror(file) == 0);
+
+    int startIdx = 0, k = 0;
+    for(int i=0; i<nread; i++) {
+        if(buffer[i] == ' ') {
+            buffer[i] = '\0';
+            hScores[k++].index = atoi(buffer+startIdx);
+            startIdx = i + 1;           
+        } 
+    }
+    hScores[k++].index = atoi(buffer+startIdx);
 
     fclose(file);
 }
@@ -431,15 +487,18 @@ int main(int argc, char *argv[]) {
     BigBoy chunkSize = (argc < 2) ? 1024 : atoi(argv[1]);
     float threshold = (argc < 3) ? 0.0 : atof(argv[2]);
     int doPreprocess = (argc < 4) ? 1 : atoi(argv[3]);
+    unsigned int manualOrder = (argc < 5) ? 0 : atoi(argv[4]);
+
+    printf("Input args:: Chunk-size: %d; Threshold: %f; Preprocessing-ptext8: %d; ManualOrder: %d; \n\n", 
+            chunkSize, threshold, doPreprocess, manualOrder);
+
     if(doPreprocess)
     {
-        printf("Pre-processing ptext -> text8\n");
+        printf("0) Pre-processing ptext -> text8\n");
         preprocessFileForSpace(pfilename, filename, chunkSize);
     }
-
     FileContent deviceFileBuffer, hostFileBuffer, reorderedFileBuffer;
     BigBoy filesize = getFilesize(filename);
-    printf("%llu\n\n", filesize);    
 
     BigBoy noOfChunks = (int) ceil(((double)filesize/(double)chunkSize));
     BigBoy nc2 = findNC2(noOfChunks);
@@ -447,7 +506,7 @@ int main(int argc, char *argv[]) {
     unsigned int noOfBlocks = (int) ceil(((double)nc2/(double)threadsPerBlock));
 
     printf("File size = %llu; chunk size = %llu;    no of chunks = %llu;\n", filesize, chunkSize, noOfChunks);
-    printf("nc2 = %llu;       threadsPerBlock = %u; no of Blocks = %u; \n", nc2, threadsPerBlock, noOfBlocks);
+    printf("nc2 = %llu;       threadsPerBlock = %u; no of Blocks = %u; \n\n", nc2, threadsPerBlock, noOfBlocks);
 
     ChunkOrder *hostReorderInfo;
     SCORE *hScores;
@@ -471,8 +530,7 @@ int main(int argc, char *argv[]) {
 
     checkCudaErrors(cudaMemcpy(deviceFileBuffer, hostFileBuffer, filesize, cudaMemcpyHostToDevice));
 
-    printf("Launching CUDA kernal\n");
-
+    printf("0) Computing vectors for n chunks\n\n");
     noOfBlocks = ceil((double)noOfChunks/(double)32);
     threadsPerBlock = 32;
     sq<<<noOfBlocks, threadsPerBlock>>>(deviceFileBuffer, 
@@ -484,11 +542,11 @@ int main(int argc, char *argv[]) {
                                         dVector,
                                         dUsedArr, doPreprocess);
     
+    printf("1) Comppute score started\n\n");
     noOfBlocks = ceil((double)nc2/(double)256);;
     threadsPerBlock = 256;
     computeScore<<<noOfBlocks, threadsPerBlock>>>(dVector, dUsedArr, noOfChunks, dScores);
 
-    printf("After Comppute score\n");
     unsigned int i, j;
 #define PRINT_DEBUG 1
 #ifdef PRINT_DEBUG
@@ -507,11 +565,11 @@ int main(int argc, char *argv[]) {
     }
 #endif
 
+    printf("2) Sort score started\n\n");
     noOfBlocks = ceil((double)noOfChunks/(double)32);
     threadsPerBlock = 32;
     sortScores<<<noOfBlocks, threadsPerBlock>>>(dScores, noOfChunks);
 
-    printf("After sort score\n");
 #ifdef PRINT_DEBUG
     checkCudaErrors(cudaMemcpy(hScores, 
                                dScores, 
@@ -528,13 +586,19 @@ int main(int argc, char *argv[]) {
     }
 #endif
 
-    getOrder<<<1,1>>>(dScores, noOfChunks, chunkSize, threshold);
+    if(manualOrder) {
+        printf("3) Getting order from file instead of actual computation !!! \n\n");
+        getOrderFromFile(hScores);
+    }
+    else {
+        printf("3) Getting order from cuda kernal\n\n");
+        getOrder<<<1,1>>>(dScores, noOfChunks, chunkSize, threshold);
 
-    printf("After get order\n");
-    checkCudaErrors(cudaMemcpy(hScores, 
-                               dScores, 
-                               sizeof(SCORE)*noOfChunks*noOfChunks, 
-                               cudaMemcpyDeviceToHost));
+        checkCudaErrors(cudaMemcpy(hScores, 
+                                   dScores, 
+                                   sizeof(SCORE)*noOfChunks*noOfChunks, 
+                                   cudaMemcpyDeviceToHost));
+    }
     for(i = 0; i < noOfChunks; i++) {
         for(j = 0; j < noOfChunks; j++) {
             printf("%u ", hScores[i*noOfChunks + j].index);
@@ -543,18 +607,11 @@ int main(int argc, char *argv[]) {
         break;
     }
 
-    printf("CUDA kernel execution over !!!\n");
+    printf("CUDA kernel execution over !!!\n\n");
 
     checkCudaErrors(cudaFree(deviceFileBuffer));
     checkCudaErrors(cudaFree(dScores));
     checkCudaErrors(cudaFree(dSyncBuffer));
-
-/*    hScores[0] = getScore(hostFileBuffer, 
-                            chunkSize, 
-                            hostFileBuffer + 1*chunkSize, 
-                            min(chunkSize, filesize - chunkSize));
-*/
-
 
     // open file descriptor
     FILE *file;
