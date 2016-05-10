@@ -282,10 +282,11 @@ __device__ unsigned int isAlreadyThere(unsigned int *order,
 }
 
 __device__ int isIndex32kApart(unsigned int index1, unsigned int index2, BigBoy chunksize) {
+        unsigned int WSIZE = 0x8000 - 258 - 3;
        if(index1 > index2) 
-               return ((index1 - index2) *chunksize) >= 32506;
+               return ((index1 - index2) *chunksize) >= WSIZE;
 
-       return ((index2 - index1) *chunksize) >= 32506;
+       return ((index2 - index1) *chunksize) >= WSIZE;
 }
 
 #define dabs(a,b) ((a)>(b)?(a-b):(b-a))
@@ -322,7 +323,7 @@ __global__ void getOrder(SCORE*       dScores,
     unsigned int i, k;
     order[0] = 0;
 
-    int insertIndex = 38; int insertPos = 3;
+/*    int insertIndex = 38; int insertPos = 3;
     
     k=1;
     for(i=1; i<noOfChunks; i++) {
@@ -336,9 +337,9 @@ __global__ void getOrder(SCORE*       dScores,
         }
         order[i]=k; k++;
     }
+*/
 
-
-/*    for(i=1; i<noOfChunks; i++) {
+    for(i=1; i<noOfChunks; i++) {
         order[i] = i;
         k=0;
         while(1) {
@@ -361,8 +362,6 @@ __global__ void getOrder(SCORE*       dScores,
             }
         }
     }
-*/
-
 
     for(i = 0; i < noOfChunks; i++) {
         dScores[i].score = order[i];
