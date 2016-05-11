@@ -498,7 +498,7 @@ int main(int argc, char *argv[]) {
 
     BigBoy chunkSize = (argc < 2) ? 1024 : atoi(argv[1]);
     float threshold = (argc < 3) ? 0.0 : atof(argv[2]);
-    int doPreprocess = (argc < 4) ? 1 : atoi(argv[3]);
+    int doPreprocess = (argc < 4) ? 0 : atoi(argv[3]);
     unsigned int manualOrder = (argc < 5) ? 0 : atoi(argv[4]);
     unsigned int printVectorArg = (argc < 6) ? 0 : atoi(argv[5]);
     unsigned int distThreshold = (argc < 6) ? 0x8000 : (atoi(argv[6])+258+3);
