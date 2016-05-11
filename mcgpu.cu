@@ -67,12 +67,13 @@ __device__ unsigned int isMatch(unsigned char *term1, unsigned char *term2) {
 }
 
 
-void printVector(TermVector *vector, unsigned int used) {
+void printVector(TermVector *vector, unsigned int used, unsigned char *db, unsigned char *hb) {
     unsigned int i;
     for(i = 0; i < used; i++) {
         unsigned int j=0;
-        while(vector[i].term[j] != ' ' && vector[i].term[j] != '\0') {
-            printf("%c", vector[i].term[j]);
+        unsigned char *term = hb + (vector[i].term - db);
+        while(term[j] != ' ' && term[j] != '\0') {
+            printf("%c", term[j]);
             j++;
         }
         printf("   = %d\n",vector[i].count);
@@ -117,7 +118,7 @@ __device__ void getVector(FileContent   content1,
         unsigned int index = findIndex(vector1, *used, content1+startIdx);
         if(index == (unsigned int)-1) {
             assert(*used < VECTOR_SIZE);
-            if(i - startIdx > 3) {
+            if(i - startIdx > 1) {
                 vector1[*used].term = content1+startIdx;
                 vector1[*used].count = 1;
                 (*used)++;
@@ -281,8 +282,8 @@ __device__ unsigned int isAlreadyThere(unsigned int *order,
     return 0;
 }
 
-__device__ int isIndex32kApart(unsigned int index1, unsigned int index2, BigBoy chunksize) {
-        unsigned int WSIZE = 0x8000 - 258 - 3;
+__device__ int isIndex32kApart(unsigned int index1, unsigned int index2, BigBoy chunksize, unsigned int distThreshold) {
+        unsigned int WSIZE = distThreshold - 258 - 3;
        if(index1 > index2) 
                return ((index1 - index2) *chunksize) >= WSIZE;
 
@@ -315,10 +316,22 @@ __device__ int findUnusedNearestIndex(unsigned int *order, unsigned int soFarFil
 
         return min;
 }
+
+
+__device__ double findScore(SCORE*       dScores, BigBoy        noOfChunks, unsigned int index) {
+
+for(int i=0; i<noOfChunks; i++) {
+    if(dScores[i].index == index) return dScores[i].score;
+}
+assert(0);
+
+return 0.0;
+} 
 __global__ void getOrder(SCORE*       dScores,
                          BigBoy        noOfChunks,
                          BigBoy        chunksize,
-                         float  threshold) {
+                         float  threshold,
+                         unsigned int distThreshold) {
     unsigned int *order = (unsigned int *) malloc(sizeof(unsigned int) * noOfChunks);
     unsigned int i, k;
     order[0] = 0;
@@ -344,8 +357,8 @@ __global__ void getOrder(SCORE*       dScores,
         k=0;
         while(1) {
             unsigned int index = findIndex(dScores, order[i-1], noOfChunks, k);
-            if((dScores[order[i-1] * noOfChunks + index].score > (double)threshold) &&
-               !isAlreadyThere(order, i, index) && isIndex32kApart(order[i-1], index, chunksize)) {
+            if((findScore(dScores + order[i-1] * noOfChunks, noOfChunks, index) > (double)threshold) &&
+               !isAlreadyThere(order, i, index) && isIndex32kApart(order[i-1], index, chunksize, distThreshold)) {
                 order[i] = index;
                 break;
             }
@@ -487,9 +500,12 @@ int main(int argc, char *argv[]) {
     float threshold = (argc < 3) ? 0.0 : atof(argv[2]);
     int doPreprocess = (argc < 4) ? 1 : atoi(argv[3]);
     unsigned int manualOrder = (argc < 5) ? 0 : atoi(argv[4]);
+    unsigned int printVectorArg = (argc < 6) ? 0 : atoi(argv[5]);
+    unsigned int distThreshold = (argc < 6) ? 0x8000 : (atoi(argv[6])+258+3);
 
-    printf("Input args:: Chunk-size: %d; Threshold: %f; Preprocessing-ptext8: %d; ManualOrder: %d; \n\n", 
-            chunkSize, threshold, doPreprocess, manualOrder);
+//    printf("Input args:: Chunk-size: %d; Threshold: %f; \nPreprocessing-ptext8: %d;"
+//           " ManualOrder: %d; printVector: %d; \n\n", 
+//            chunkSize, threshold, doPreprocess, manualOrder, printVector);
 
     if(doPreprocess)
     {
@@ -507,6 +523,8 @@ int main(int argc, char *argv[]) {
     printf("File size = %llu; chunk size = %llu;    no of chunks = %llu;\n", filesize, chunkSize, noOfChunks);
     printf("nc2 = %llu;       threadsPerBlock = %u; no of Blocks = %u; \n\n", nc2, threadsPerBlock, noOfBlocks);
 
+    TermVector *hVector;
+    unsigned int *hUsedArr;
     ChunkOrder *hostReorderInfo;
     SCORE *hScores;
     hostFileBuffer = (FileContent) malloc(filesize+1);
@@ -516,6 +534,10 @@ int main(int argc, char *argv[]) {
     hostReorderInfo = (ChunkOrder *) malloc(sizeof(ChunkOrder)*noOfChunks);
     hScores = (SCORE *) malloc(sizeof(SCORE)*noOfChunks*noOfChunks);
     assert(hScores != NULL);
+    hVector = (TermVector*) malloc(noOfChunks * TERMS_PER_CHUNK * sizeof(TermVector));
+    assert(hVector != NULL);
+    hUsedArr = (unsigned int *) malloc(noOfChunks * sizeof(unsigned int));
+    assert(hUsedArr != NULL);
 
     ChunkOrder *deviceReorderInfo;
     SCORE *dScores;
@@ -540,7 +562,16 @@ int main(int argc, char *argv[]) {
                                         dSyncBuffer, 
                                         dVector,
                                         dUsedArr, doPreprocess);
-    
+   
+    checkCudaErrors(cudaMemcpy(hVector, dVector, noOfChunks * TERMS_PER_CHUNK * sizeof(TermVector), cudaMemcpyDeviceToHost));
+    checkCudaErrors(cudaMemcpy(hUsedArr, dUsedArr, noOfChunks * sizeof(unsigned int), cudaMemcpyDeviceToHost));
+    if(printVectorArg) {
+        for(int i = 0; i< noOfChunks; i++) {
+            printf("Printing chunk %d::\n",i);
+            printVector(hVector + i * TERMS_PER_CHUNK , hUsedArr[i], deviceFileBuffer, hostFileBuffer); 
+        }
+    }
+
     printf("1) Comppute score started\n\n");
     noOfBlocks = ceil((double)nc2/(double)256);;
     threadsPerBlock = 256;
@@ -591,7 +622,7 @@ int main(int argc, char *argv[]) {
     }
     else {
         printf("3) Getting order from cuda kernal\n\n");
-        getOrder<<<1,1>>>(dScores, noOfChunks, chunkSize, threshold);
+        getOrder<<<1,1>>>(dScores, noOfChunks, chunkSize, threshold, distThreshold);
 
         checkCudaErrors(cudaMemcpy(hScores, 
                                    dScores, 
