@@ -1,7 +1,13 @@
-rm serialMC.exe mc.exe;
+rm cosineMC.exe mc.exe;
 rm smc.o mc.o;
+rm reorg.exe;
+
+gcc -g3 reorg.c  -std=c99 -o reorg.exe;
+
 nvcc -c --compiler-options -std=gnu99 --compiler-options -ffloat-store --compiler-options -fno-strict-aliasing --compiler-options -fsigned-char --compiler-options  -Wall -Iinc -D __USE_LARGEFILE64 -D _FILE_OFFSET_BITS=64 -O0 --compiler-options  -O3 mcgpu.cu -o mc.o --compiler-options  -g -G;
 gcc -std=gnu99 -ffloat-store -fno-strict-aliasing -fsigned-char  -O0 -o mc.exe mc.o  -lm  -L/usr/local/cuda-7.5/lib64/ -lcuda -lcudart;
 
 nvcc -c --compiler-options -std=gnu99 --compiler-options -ffloat-store --compiler-options -fno-strict-aliasing --compiler-options -fsigned-char --compiler-options  -Wall -Iinc -D __USE_LARGEFILE64 -D _FILE_OFFSET_BITS=64 -O0 --compiler-options  -O3 mcgpu.cu -o smc.o --compiler-options  -g -G -D SERIAL;
-gcc -std=gnu99 -ffloat-store -fno-strict-aliasing -fsigned-char  -O0 -o serialMC.exe smc.o  -lm  -L/usr/local/cuda-7.5/lib64/ -lcuda -lcudart -DSERIAL=1;
+gcc -std=gnu99 -ffloat-store -fno-strict-aliasing -fsigned-char  -O0 -o cosineMC.exe smc.o  -lm  -L/usr/local/cuda-7.5/lib64/ -lcuda -lcudart -DSERIAL=1;
+
+rm smc.o mc.o;

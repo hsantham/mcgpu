@@ -515,13 +515,33 @@ void preprocessFileForSpace(char *inputFile, char *outputFile, unsigned int chun
     free(temp);
 }
 
+unsigned int getNoOfDigits(unsigned int index) {
+    unsigned int reverse = 1;
+    while(index != 0) {
+        index = index / 10;
+        if(index) 
+            reverse++;
+    }
+
+    return reverse;
+}
+
+unsigned int getReverse(unsigned int index) {
+    unsigned int reverse = 0;
+    while(index != 0) {
+        reverse = reverse * 10 + (index % 10);
+        index = index / 10;
+    }
+
+    return reverse;
+}
+
 #define PRINT_DEBUG 1
 int main(int argc, char *argv[]) {
 
     unsigned int i, j;
-    filename = (char *) "text8";
+    filename = (char *) "input_text";
     FileName pfilename = ( char *) "ptext8";
-    outputFilename = (char *) "otext8";
 
     BigBoy chunkSize = (argc < 2) ? 1024 : atoi(argv[1]);
     float threshold = (argc < 3) ? 0.0 : atof(argv[2]);
@@ -686,7 +706,6 @@ int main(int argc, char *argv[]) {
         //                           sizeof(SCORE)*noOfChunks*noOfChunks, 
         //                           cudaMemcpyDeviceToHost));
 		getOrderWrapper(hScores, noOfChunks, chunkSize, threshold, distThreshold);
-		printf("CUDA kernel execution over !!!\n\n");
 #else
 		getOrderWrapper(hScores, noOfChunks, chunkSize, threshold, distThreshold);
 #endif
@@ -699,6 +718,39 @@ int main(int argc, char *argv[]) {
         printf("\n");
         break;
     }
+    
+    FILE *file;
+    outputFilename = (char *) "reorder_info";
+    file = fopen((const char *)outputFilename, "w");
+    assert(file != NULL);
+
+    size_t written;
+    for(i = 0; i <= noOfChunks; i++) {
+        unsigned int index;
+        if(i != noOfChunks) {
+            index = hScores[i].index; 
+        } else {
+            index = chunkSize;
+        }
+        
+        unsigned int reversed = getReverse(index);
+        unsigned int noOfDigits = getNoOfDigits(index);
+        for(int k=0; k<noOfDigits; k++){
+            char b='0' + (reversed%10);
+            written = fwrite(&b, 1, 1, file);
+            assert(written == 1);
+            assert(ferror(file) == 0);
+            reversed = reversed/10;
+        }
+        if(i != (noOfChunks)) {
+            char b=' ';
+            written = fwrite(&b, 1, 1, file);
+            assert(written == 1);
+            assert(ferror(file) == 0);
+        }
+    }
+
+    fclose(file);
 
 #ifndef SERIAL
     checkCudaErrors(cudaFree(deviceFileBuffer));
@@ -709,11 +761,10 @@ int main(int argc, char *argv[]) {
 #endif
 
     // open file descriptor
-    FILE *file;
+    outputFilename = (char *) "preprocessed_input_text";
     file = fopen((const char *)outputFilename, "w");
     assert(file != NULL);
 
-    size_t written;
     for(i = 0; i < noOfChunks; i++) {
         unsigned int bytesToWrite = min(chunkSize, filesize - hScores[i].index * chunkSize);
         written = fwrite(hostFileBuffer + hScores[i].index * chunkSize, 1, bytesToWrite, file);

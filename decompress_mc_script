@@ -1,0 +1,2 @@
+gunzip compress_with_mc.gz;
+./reorg.exe;
