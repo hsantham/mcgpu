@@ -1,4 +1,0 @@
-./h.exe $1 $2 $3 $4 $5 $6 $7
-../gzip124/gzip text8 -c > text8.zip
-../gzip124/gzip otext8 -c > otext8.zip
-ls -lrt *text8.zip
