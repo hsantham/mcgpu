@@ -1,0 +1,23 @@
+"Subject","Body","From: (Name)","From: (Address)","From: (Type)","To: (Name)","To: (Address)","To: (Type)","CC: (Name)","CC: (Address)","CC: (Type)","BCC: (Name)","BCC: (Address)","BCC: (Type)","Billing Information","Categories","Importance","Mileage","Sensitivity"
+"Sample Builder Code Walkthrough - Session 2","Rescheduling based on Sudhir’s availability.
+
+Scheduling another meeting for Mobi8SampleBuilder walkthrough.
+","R, Aravind","/O=AMAZON/OU=EXCHANGE ADMINISTRATIVE GROUP (FYDIBOHF23SPDLT)/CN=RECIPIENTS/CN=ARAVIN","EX","Kumar, Sudhir;D R, Thamarai","/O=AMAZON/OU=EXCHANGE ADMINISTRATIVE GROUP (FYDIBOHF23SPDLT)/CN=RECIPIENTS/CN=Sudhirk;/O=AMAZON/OU=EXCHANGE ADMINISTRATIVE GROUP (FYDIBOHF23SPDLT)/CN=RECIPIENTS/CN=Thamarai","EX;EX","'kindlegen-qa@amazon.com';Gilbert, Sudha Nancy;K, Parthiban;Sharma, Devesh;Majeeth, Abdul;S, Hemanthkumar","kindlegen-qa@amazon.com;/O=AMAZON/OU=EXCHANGE ADMINISTRATIVE GROUP (FYDIBOHF23SPDLT)/CN=RECIPIENTS/CN=Sudhag;/O=AMAZON/OU=EXCHANGE ADMINISTRATIVE GROUP (FYDIBOHF23SPDLT)/CN=RECIPIENTS/CN=Pathiban;/O=AMAZON/OU=EXCHANGE ADMINISTRATIVE GROUP (FYDIBOHF23SPDLT)/CN=RECIPIENTS/CN=Deveshs;/O=AMAZON/OU=EXCHANGE ADMINISTRATIVE GROUP (FYDIBOHF23SPDLT)/CN=RECIPIENTS/CN=Abdulmaj;/O=AMAZON/OU=EXCHANGE ADMINISTRATIVE GROUP (FYDIBOHF23SPDLT)/CN=RECIPIENTS/CN=Hemanths","SMTP;EX;EX;EX;EX;EX",,,,,,"Normal",,"Normal"
+"RE: ePub 3.0 question","Please let me get this straight:
+
+ 
+
+I think we’ve already done to find gap between 1.0 and 1.1. Can you confirm? (please review this thread)
+
+ 
+
+“But to complete the analysis, we need to find the gap between KF8 and updates from 1.0->1.1. To find this, please send the document version 1.1.  Also please give pointers in the document where update history [1.0->1.1] is mentioned.”
+
+ 
+
+ 
+
+From: S, Hemanthkumar 
+Sent: Friday, January 25, 2013 3:08 PM
+To: Park, Jae Hoon; Chidambaram, Palanidaran; Hashimoto, Hajime; Kato, Masayuki; Mauck, Kristin; Singh, Gagandeep
+Cc: Crossgrove, Dana; Vickers, Shaun; Singh, Sam; Chen, Steve; Krabill, Mi
