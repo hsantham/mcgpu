@@ -1,6 +1,6 @@
 rm compress_without_mc.gz compress_with_mc.gz;
 ./cosineMC.exe $1 $2 $3 $4 $5 $6 $7
-../gzip124/gzip input_text -c > compress_without_mc.gz
-../gzip124/gzip preprocessed_input_text -c > compress_with_mc.gz
+../gzip124/gzip input_text -c > compressed_file_with_gzip.gz
+../gzip124/gzip preprocessed_input_text -c > compressed_file_with_mc_gzip.gz
 rm preprocessed_input_text;
-ls -lrt compress*.gz
+ls -lrt compressed_file_*.gz

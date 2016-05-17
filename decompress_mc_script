@@ -1,2 +1,2 @@
-gunzip compress_with_mc.gz;
+gunzip compressed_file_with_mc_gzip.gz
 ./reorg.exe;

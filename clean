@@ -1,1 +1,4 @@
-rm -f h.o h.exe
+rm *.o *.exe;
+rm compressed_file*;
+rm decompressed_file;
+rm reorder_info;

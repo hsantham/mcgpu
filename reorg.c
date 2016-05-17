@@ -83,7 +83,7 @@ int main() {
 	unsigned int chunksize = indexOrder[used-1];
 	used--;
 	
-    unsigned char  *unziped   = "compress_with_mc";
+    unsigned char  *unziped   = "compressed_file_with_mc_gzip";
 	unsigned char *hostFileBuffer;
 	unsigned long long int filesize = getFilesize(unziped);
 	hostFileBuffer = (unsigned char *) malloc(filesize+1);
